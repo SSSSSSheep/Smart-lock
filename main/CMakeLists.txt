@@ -1,0 +1,10 @@
+idf_component_register(
+    SRCS 
+        "main.c"
+        "Common/Com_Debug.c"
+        "Inf/Inf_DBR6120.c"
+        "Inf/Inf_WTN6170.c"
+    INCLUDE_DIRS
+         "."
+         "Common"
+         "Inf")
