@@ -4,6 +4,7 @@ idf_component_register(
         "Common/Com_Debug.c"
         "Inf/Inf_DBR6120.c"
         "Inf/Inf_WTN6170.c"
+        "Inf/Inf_SC12B.c"
     INCLUDE_DIRS
          "."
          "Common"
