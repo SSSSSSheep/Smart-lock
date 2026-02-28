@@ -4,6 +4,7 @@
 #include "Inf/Inf_SC12B.h"
 #include "Inf/Inf_WS2812.h"
 #include "Driver/Dri_NVS.h"
+#include "Inf/Inf_FPM383.h"
 #include "Com_Debug.h"
 #include "Com_Config.h"
 #include "App/App_IO.h"
@@ -13,6 +14,12 @@ TaskHandle_t KeyScanHandle;
 
 void app_main(void)
 {
+    // 测试指纹模块获取唯一设别号
+    Inf_FPM383_Init();
+    Inf_FPM383_ReadId();
+
+    Inf_FPM383_Sleep();
+
     // 1. 初始化所有基础模块
     App_IO_Init();
 
