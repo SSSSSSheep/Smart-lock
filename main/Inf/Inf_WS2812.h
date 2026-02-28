@@ -35,4 +35,9 @@ void Inf_WS2812_LightKeyLed(Touch_Key key, uint8_t color[]);
  */
 void Inf_WS2812_LightAllKeyLeds(uint8_t color[]);
 
+/**
+ * @description: 点亮led回显为黑色
+ */
+void Inf_WS2812_LightLedBlack(void);
+
 #endif

@@ -57,4 +57,10 @@ uint8_t Inf_SC12B_ReadReg(uint8_t reg_addr);
  */
 Touch_Key Inf_SC12B_ReadKey(void);
 
+/**
+ * @brief 根据中断标记位 获取SC12B按键点击事件
+ * @return Touch_Key 按键值
+ */
+Touch_Key Inf_SC12B_GetKeyClick(void);
+
 #endif /* __INF_SC12B_H__ */

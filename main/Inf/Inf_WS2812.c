@@ -205,3 +205,8 @@ void Inf_WS2812_LightAllKeyLeds(uint8_t color[])
     }
     Inf_WS2812_LightLeds();
 }
+
+void Inf_WS2812_LightLedBlack(void)
+{
+    Inf_WS2812_LightAllKeyLeds(black);
+}

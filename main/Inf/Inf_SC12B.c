@@ -122,3 +122,15 @@ Touch_Key Inf_SC12B_ReadKey(void)
     }
     return touchKey;
 }
+
+Touch_Key Inf_SC12B_GetKeyClick(void)
+{
+    Touch_Key touchKey = KEY_NO;
+    if (isTouch)
+    {
+        touchKey = Inf_SC12B_ReadKey();
+        isTouch = 0;
+    }
+
+    return touchKey;
+}

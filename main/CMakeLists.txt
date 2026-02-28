@@ -7,8 +7,10 @@ idf_component_register(
         "Inf/Inf_SC12B.c"
         "Inf/Inf_WS2812.c"
         "Driver/Dri_NVS.c"
+        "App/App_IO.c"
     INCLUDE_DIRS
          "."
          "Common"
          "Inf"
-         "Driver")
+         "Driver"
+         "App")
