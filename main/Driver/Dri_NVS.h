@@ -23,7 +23,7 @@ esp_err_t Dri_NVS_WriteStr(uint8_t *key, uint8_t *value);
  * @param value 键值
  * @param value_len 键值长度
  */
-esp_err_t Dri_NVS_ReadStr(uint8_t *key, uint8_t *value, size_t *value_len);
+esp_err_t Dri_NVS_ReadStr(uint8_t *key, uint8_t *value, uint8_t *value_len);
 
 /**
  * @brief 删除 NVS 中的指定键

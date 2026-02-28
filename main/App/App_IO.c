@@ -81,17 +81,279 @@ static void App_IO_AddAdmin(void)
         App_IO_ClearBuffer();
     }
 }
+
+/**
+ * @brief 检查管理员账号是否存在
+ *
+ */
+static Com_Status App_IO_CheckAdmin(void)
+{
+    // 语音提示输入管理员账号
+    sayWithoutInt();
+    sayInputAdminPassword();
+
+    // 读取按键组合
+    Com_Status comStatus = App_IO_ReadStr(first_buffer);
+    switch (comStatus)
+    {
+    case Com_OK:
+        // 从FLASH中读取已经存在的管理员密码
+        uint8_t len = 0;
+        esp_err_t err = Dri_NVS_ReadStr((uint8_t *)ADMIN_PWD, second_buffer, &len);
+
+        // 比较从键盘输入与FLASH中读取的密码长度是否一致
+        if (strcmp((char *)first_buffer, (char *)second_buffer) == 0)
+        {
+            return Com_OK;
+        }
+        break;
+    case Com_ERROR:
+        sayIllegalOperation();
+        break;
+    default:
+        break;
+    }
+
+    // 清理缓冲区
+    App_IO_ClearBuffer();
+    return Com_ERROR;
+}
+
+/*
+    2.删除管理员账号
+        1.1 输入特殊指令(01#) 输入已完成
+        1.2 判断管理员账号是否存在
+        1.3 按键输入管理员密码
+        1.4 从FLASH中读取已经存在的管理员密码
+        1.5 比较从键盘输入与FLASH中读取的密码
+        1.6 根据比较结果做处理
+ */
 static void App_IO_DelAdmin(void)
 {
+    // 判断管理员账号是否存在
+    if (Dri_NVS_IsKeyExist((uint8_t *)ADMIN_PWD) != ESP_OK) // 不存在
+    {
+        sayIllegalOperation();
+        return;
+    }
+    else // 存在
+    {
+        sayWithoutInt();
+        sayDelAdmin();
+        Com_Status comStatus = App_IO_CheckAdmin();
+        if (comStatus == Com_OK)
+        {
+            // 执行删除管理员操作
+            esp_err_t err = Dri_NVS_DelKey((uint8_t *)ADMIN_PWD);
+            if (err == ESP_OK)
+            {
+                sayDelSucc();
+            }
+            else
+            {
+                sayDelFail();
+            }
+        }
+        else
+        {
+            sayDelFail();
+        }
+    }
 }
+
+/*
+        3.注册普通用户账号
+        1.1 输入特殊指令(10#)
+        1.2 按键输入密码(管理员)
+        1.3 从FLASH中读取已经存在的管理员密码
+        1.4 比较从键盘输入与FLASH中读取的密码
+        1.5 根据比较结果做处理
+            比较结果不同:
+                注册失败
+            比较结果相同:
+                按键输入密码(普通账号)
+                再次输入密码(普通账号)
+                比较两次输入结果
+                根据比较结果做处理
+*/
 static void App_IO_AddUser(void)
 {
+    // 判断管理员是否存在
+    if (Dri_NVS_IsKeyExist((uint8_t *)ADMIN_PWD) != ESP_OK) // 不存在
+    {
+        sayIllegalOperation();
+    }
+    else
+    {
+        // 验证管理员
+        sayWithoutInt();
+        sayAddUser();
+        Com_Status comStatus = App_IO_CheckAdmin();
+
+        if (comStatus == Com_OK)
+        {
+            // 按键输入密码
+            sayInputUserPassword();
+            comStatus = App_IO_ReadStr(first_buffer);
+            switch (comStatus)
+            {
+            case Com_OK:
+                // 再次输入密码
+                sayInputUserPasswordAgain();
+                comStatus = App_IO_ReadStr(second_buffer);
+
+                switch (comStatus)
+                {
+                case Com_OK:
+                    // 比较两次键盘读取的按键组合
+                    if (strcmp((char *)first_buffer, (char *)second_buffer) == 0)
+                    {
+                        // 将用户密码写入FLASH
+                        esp_err_t err = Dri_NVS_WriteStr((uint8_t *)first_buffer, (uint8_t *)"0");
+                        if (err == ESP_OK)
+                        {
+                            // 密码一致
+                            sayAddSucc();
+                        }
+                        else
+                        {
+                            // 密码不一致
+                            sayAddFail();
+                        }
+                    }
+                    else
+                    {
+                        // 密码不一致
+                        sayAddFail();
+                    }
+                    break;
+                case Com_ERROR:
+                    sayIllegalOperation();
+                    break;
+                default:
+                    break;
+                }
+
+                break;
+            case Com_ERROR:
+                sayIllegalOperation();
+                break;
+            default:
+                break;
+            }
+        }
+        else
+        {
+            sayAddFail();
+        }
+    }
+
+    // 清理缓冲区
+    App_IO_ClearBuffer();
 }
+
+/*
+    4.删除普通用户账号
+        1.1 输入特殊指令(11#)
+        1.2 按键输入密码(管理员)
+        1.3 从FLASH中读取已经存在的管理员密码
+        1.4 比较从键盘输入与FLASH中读取的密码
+        1.5 根据比较结果做处理
+            比较结果不同:
+                删除失败
+            比较结果相同:
+                按键输入密码(普通账号)
+                从FLASH中读取已经存在的普通用户密码
+                比较两次输入结果
+                根据比较结果做处理
+ */
 static void App_IO_DelUser(void)
 {
+    // 判断管理员是否存在
+    if (Dri_NVS_IsKeyExist((uint8_t *)ADMIN_PWD) != ESP_OK) // 不存在
+    {
+        sayIllegalOperation();
+    }
+    else
+    {
+        sayWithoutInt();
+        sayDelUser();
+        // 验证管理员
+        Com_Status comStatus = App_IO_CheckAdmin();
+
+        if (comStatus == Com_OK)
+        {
+            sayInputUserPassword();
+            comStatus = App_IO_ReadStr(first_buffer);
+            switch (comStatus)
+            {
+            case Com_OK:
+
+                // 判断当前输入的数字组合在FLASH中是否存在
+                if (Dri_NVS_IsKeyExist((uint8_t *)first_buffer) == ESP_OK)
+                {
+                    // 执行删除操作
+                    esp_err_t err = Dri_NVS_DelKey((uint8_t *)first_buffer);
+                    if (err == ESP_OK)
+                    {
+                        sayDelSucc();
+                    }
+                    else
+                    {
+                        sayDelFail();
+                    }
+                }
+                else
+                {
+                    sayDelFail();
+                }
+                break;
+            case Com_ERROR:
+                sayIllegalOperation();
+                break;
+            default:
+                break;
+            }
+        }
+        else
+        {
+            sayDelFail();
+        }
+    }
+
+    // 清理缓冲区
+    App_IO_ClearBuffer();
 }
-static void App_IO_CheckUser(void)
+
+/*
+    5.验证普通用户密码开锁
+        5.1 按键输入密码(普通账号)
+        5.2 从FLASH中读取已经存在的普通用户密码
+        5.3 比较两次输入结果
+            比较结果不同:
+                验证失败 -&gt; 请重试
+            比较结果相同:
+                验证成功 驱动电机开锁
+ */
+static void App_IO_CheckUser(uint8_t *pwd)
 {
+    // 判断当前输入的数字组合在FLASH中是否存在
+    if (Dri_NVS_IsKeyExist(pwd) == ESP_OK)
+    {
+        sayVerifySucc();
+        Inf_DBR6120_OpenLock();
+        sayDoorOpen();
+    }
+    else
+    {
+        sayWithoutInt();
+        sayVerifyFail();
+        sayWithoutInt();
+        sayRetry();
+    }
+
+    // 清理缓冲区
+    App_IO_ClearBuffer();
 }
 
 void App_IO_Init(void)
@@ -219,6 +481,6 @@ void App_IO_Handler(uint8_t *pwd)
     // 第一次输入超过两个数字，表示在验证密码开锁
     else
     {
-        App_IO_CheckUser();
+        App_IO_CheckUser(pwd);
     }
 }
