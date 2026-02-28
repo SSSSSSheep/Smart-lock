@@ -5,7 +5,10 @@ idf_component_register(
         "Inf/Inf_DBR6120.c"
         "Inf/Inf_WTN6170.c"
         "Inf/Inf_SC12B.c"
+        "Inf/Inf_WS2812.c"
+        "Driver/Dri_NVS.c"
     INCLUDE_DIRS
          "."
          "Common"
-         "Inf")
+         "Inf"
+         "Driver")
