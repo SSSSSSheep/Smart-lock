@@ -6,6 +6,7 @@
 #include "Inf_WS2812.h"
 #include "Inf_DBR6120.h"
 #include "Inf_WTN6170.h"
+#include "Inf_FPM383.h"
 #include "Com_Config.h"
 
 #define ADMIN_PWD "admin"
@@ -27,5 +28,10 @@ Com_Status App_IO_ReadStr(uint8_t *pwd);
  * @param pwd 存储读取到的密码的数组
  */
 void App_IO_Handler(uint8_t *pwd);
+
+/**
+ * @brief 处理指纹模块读取到的指纹
+ */
+void App_IO_Finger(void);
 
 #endif // !__APP_IO_H__

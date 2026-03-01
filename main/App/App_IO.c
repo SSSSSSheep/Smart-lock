@@ -3,6 +3,9 @@
 uint8_t first_buffer[100] = {0};
 uint8_t second_buffer[100] = {0};
 
+extern TaskHandle_t fingerScanHandle;
+extern uint8_t hasFinger;
+
 static void App_IO_ClearBuffer(void)
 {
     memset(first_buffer, 0, sizeof(first_buffer));
@@ -360,7 +363,6 @@ void App_IO_Init(void)
 {
     // 1. 电机初始化
     Inf_DBR6120_Init();
-
     // 2. 语音模块初始化
     Inf_WTN6170_Init();
     // 3. 按键模块初始化
@@ -370,6 +372,8 @@ void App_IO_Init(void)
     Inf_WS2812_LightLedBlack();
     // 5. 初始化NVS模块
     Dri_NVS_Init();
+    // 6. 指纹模块初始化
+    Inf_FPM383_Init();
 }
 
 Com_Status App_IO_ReadStr(uint8_t *pwd)
@@ -461,10 +465,45 @@ void App_IO_Handler(uint8_t *pwd)
         {
             App_IO_AddUser();
         }
-        // 删除普通用户
-        else if (pwd[0] == '1' && pwd[1] == '1')
+        // 注册指纹
+        else if (pwd[0] == '2' && pwd[1] == '0')
         {
-            App_IO_DelUser();
+            // 验证管理员
+            sayWithoutInt();
+            sayAddUserFingerprint();
+            Com_Status comStatus = App_IO_CheckAdmin();
+            // 通知指纹模块任务
+            if (comStatus == Com_OK)
+            {
+                xTaskNotify(fingerScanHandle, (uint32_t)1, eSetValueWithOverwrite);
+            }
+            else
+            {
+                sayVerifyFail();
+            }
+        }
+        // 删除指纹
+        else if (pwd[0] == '2' && pwd[1] == '1')
+        {
+            // 验证管理员
+            sayWithoutInt();
+            sayDelUserFingerprint();
+            Com_Status comStatus = App_IO_CheckAdmin();
+            // 通知指纹模块任务
+            if (comStatus == Com_OK)
+            {
+                xTaskNotify(fingerScanHandle, (uint32_t)2, eSetValueWithOverwrite);
+            }
+            else
+            {
+                sayVerifyFail();
+            }
+        }
+        // 删除所有指纹
+        else if (pwd[0] == '8' && pwd[1] == '8')
+        {
+            sayDelAll();
+            Inf_FPM383_DelAllFingerPrint();
         }
         // 删除所有用户
         else if (pwd[0] == '9' && pwd[1] == '9')
@@ -482,5 +521,103 @@ void App_IO_Handler(uint8_t *pwd)
     else
     {
         App_IO_CheckUser(pwd);
+    }
+}
+
+void App_IO_Finger(void)
+{
+    // 等待通知
+    uint32_t notifyValue = 0;
+    xTaskNotifyWait(UINT32_MAX, UINT32_MAX, &notifyValue, 0);
+
+    // 根据操作值进行不同的业务处理
+    if (notifyValue)
+    {
+        // 关闭指纹模块的中断 防止在注册或者删除之后自动走一次验证代码
+        gpio_intr_disable(Inf_FPM383_INTR_PIN);
+
+        // 注册指纹逻辑
+        if (notifyValue == 1)
+        {
+            sayPlaceFinger();
+            vTaskDelay(1500);
+            // 获取最小的可用ID
+            uint16_t id = Inf_FPM383_GetMinId();
+            MY_LOGE("minId:%d", id);
+
+            // 注册指纹
+            Com_Status comStatus = Inf_FPM383_AddFingerPrint(id);
+
+            if (comStatus == Com_OK)
+            {
+                sayFingerprintAddSucc();
+            }
+            else
+            {
+                sayFingerprintAddFail();
+            }
+        }
+        // 删除指纹逻辑
+        else if (notifyValue == 2)
+        {
+            sayPlaceFinger();
+            vTaskDelay(1500); // 听完语音以后再放手指
+            // 获取当前放置手指的ID
+            uint16_t id = Inf_FPM383_FindFingerPrint();
+            MY_LOGE("DEL ID = %d", id);
+
+            if (id != -1)
+            {
+                // 删除指纹
+                Com_Status comStatus = Inf_FPM383_DelFingerPrint(id);
+                if (comStatus == Com_OK)
+                {
+                    sayDelSucc();
+                }
+                else
+                {
+                    sayDelFail();
+                }
+            }
+            else
+            {
+                sayDelFail();
+            }
+        }
+
+        // 进入休眠模式 由于芯片本身有自己的定时器 所以不需要手动进入休眠模式
+        // Inf_FPM383_Sleep();
+        vTaskDelay(2000);
+        esp_restart();
+    }
+    // 默认清空 没有任务通知 表示验证指纹
+    else
+    {
+        // 判断是否有手指按下
+        if (hasFinger)
+        {
+            // 清理标记位
+            hasFinger = 0;
+
+            // 验证指纹 开锁
+            Com_Status comStatus = Inf_FPM383_CheckFingerPrint();
+            if (comStatus == Com_OK)
+            {
+                sayVerifySucc();
+                Inf_DBR6120_OpenLock();
+                sayDoorOpen();
+            }
+            else
+            {
+                sayWithoutInt();
+                sayVerifyFail();
+                sayWithoutInt();
+                sayRetry();
+            }
+
+            // 进入休眠模式 由于芯片本身有自己的定时器 所以不需要手动进入休眠模式
+            // Inf_FPM383_Sleep();
+            esp_restart();
+        }
     }
 }
