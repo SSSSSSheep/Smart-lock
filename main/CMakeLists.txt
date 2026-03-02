@@ -9,6 +9,7 @@ idf_component_register(
         "Inf/Inf_FPM383.c"
         "Driver/Dri_NVS.c"
         "Driver/Dri_BLE.c"
+        "Driver/Dri_Wifi.c"
         "App/App_IO.c"
         "App/App_Communication.c"
     INCLUDE_DIRS

@@ -499,6 +499,12 @@ void App_IO_Handler(uint8_t *pwd)
                 sayVerifyFail();
             }
         }
+        // 执行OTA升级
+        else if (pwd[0] == '3' && pwd[0] == '3')
+        {
+            // 执行OTA升级
+            App_Communication_OTA();
+        }
         // 删除所有指纹
         else if (pwd[0] == '8' && pwd[1] == '8')
         {

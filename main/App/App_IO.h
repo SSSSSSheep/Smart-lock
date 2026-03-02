@@ -8,6 +8,7 @@
 #include "Inf_WTN6170.h"
 #include "Inf_FPM383.h"
 #include "Com_Config.h"
+#include "App_Communication.h"
 
 #define ADMIN_PWD "admin"
 

@@ -3,8 +3,9 @@
 #include "Inf/Inf_WTN6170.h"
 #include "Inf/Inf_SC12B.h"
 #include "Inf/Inf_WS2812.h"
-#include "Driver/Dri_NVS.h"
 #include "Inf/Inf_FPM383.h"
+#include "Driver/Dri_NVS.h"
+#include "Driver/Dri_WIFI.h"
 #include "Com_Debug.h"
 #include "Com_Config.h"
 #include "App/App_IO.h"
@@ -18,6 +19,9 @@ TaskHandle_t fingerScanHandle;
 
 void app_main(void)
 {
+    // wifi初始化
+    // Dri_Wifi_Init();
+
     // // 测试指纹模块获取唯一设别号
     // Inf_FPM383_Init();
     // Inf_FPM383_ReadId();
@@ -28,7 +32,7 @@ void app_main(void)
     App_Communication_Init();
 
     // 2. 创建一个读取按键的任务
-    xTaskCreate(key_Scan_task, "key_Scan_task", 2048, NULL, 5, &keyScanHandle);
+    xTaskCreate(key_Scan_task, "key_Scan_task", 8192, NULL, 5, &keyScanHandle);
     // 3. 创建一个指纹模块的任务
     xTaskCreate(finger_Scan_Task, "finger_Scan_Task", 2048, NULL, 5, &fingerScanHandle);
 }
