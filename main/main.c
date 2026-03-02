@@ -8,6 +8,7 @@
 #include "Com_Debug.h"
 #include "Com_Config.h"
 #include "App/App_IO.h"
+#include "App/App_Communication.h"
 
 void key_Scan_task(void *pvParameters);
 TaskHandle_t keyScanHandle;
@@ -24,6 +25,7 @@ void app_main(void)
 
     // 1. 初始化所有基础模块
     App_IO_Init();
+    App_Communication_Init();
 
     // 2. 创建一个读取按键的任务
     xTaskCreate(key_Scan_task, "key_Scan_task", 2048, NULL, 5, &keyScanHandle);

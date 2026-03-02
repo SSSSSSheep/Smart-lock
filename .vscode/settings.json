@@ -16,5 +16,5 @@
     "--query-driver=**",
     "--compile-commands-dir=d:\\smart_lock\\build"
 ],
-"idf.flashType": "JTAG"
+"idf.flashType": "UART"
 }
