@@ -435,7 +435,9 @@ Com_Status Inf_FPM383_DelFingerPrint(uint16_t id)
         '\0', // 校验和
     };
 
-    // 2. 补充校验和
+    // 2. 补充ID和校验和
+    cmd[10] = (id >> 8);
+    cmd[11] = id;
     Inf_FPM383_AddChecksum(cmd, 16);
 
     // 3. 发送指令集
