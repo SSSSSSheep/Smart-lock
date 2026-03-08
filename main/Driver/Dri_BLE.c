@@ -563,7 +563,7 @@ void Dri_BLE_Init(void)
 {
     esp_err_t ret;
 
-    // Initialize NVS.
+    // 初始化FLASH用于存储连接设备信息
     ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
@@ -572,15 +572,21 @@ void Dri_BLE_Init(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    // 当前模式为低功耗，不管之前是否初始化过，都需要释放经典蓝牙内存
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
 
+    // 创建蓝牙配置信息
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+
+    // 初始化蓝牙模块
     ret = esp_bt_controller_init(&bt_cfg);
     if (ret)
     {
         ESP_LOGE(GATTS_TABLE_TAG, "%s init controller failed: %s", __func__, esp_err_to_name(ret));
         return;
     }
+
+    // 启动蓝牙模块
     ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (ret)
     {
@@ -590,12 +596,15 @@ void Dri_BLE_Init(void)
 
     ESP_LOGI(GATTS_TABLE_TAG, "%s init bluetooth", __func__);
 
+    // 蓝牙应用层初始化
     ret = esp_bluedroid_init();
     if (ret)
     {
         ESP_LOGE(GATTS_TABLE_TAG, "%s init bluetooth failed: %s", __func__, esp_err_to_name(ret));
         return;
     }
+
+    // 蓝牙应用层使能
     ret = esp_bluedroid_enable();
     if (ret)
     {
@@ -603,12 +612,15 @@ void Dri_BLE_Init(void)
         return;
     }
 
+    // 注册回调函数
     ret = esp_ble_gatts_register_callback(gatts_event_handler);
     if (ret)
     {
         ESP_LOGE(GATTS_TABLE_TAG, "gatts register error, error code = %x", ret);
         return;
     }
+
+    // 注册回调函数
     ret = esp_ble_gap_register_callback(gap_event_handler);
     if (ret)
     {

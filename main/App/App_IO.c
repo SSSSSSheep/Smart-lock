@@ -500,7 +500,7 @@ void App_IO_Handler(uint8_t *pwd)
             }
         }
         // 执行OTA升级
-        else if (pwd[0] == '3' && pwd[0] == '3')
+        else if (pwd[0] == '3' && pwd[1] == '3')
         {
             // 执行OTA升级
             App_Communication_OTA();
