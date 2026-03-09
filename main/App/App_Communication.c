@@ -1,19 +1,68 @@
 #include "App_Communication.h"
 
 #define HASH_LEN 32
+
+/**
+ * @brief 从服务器下载SHA256哈希文件
+ * @param url 哈希文件URL
+ * @param hash 输出缓冲区（32字节）
+ */
+static esp_err_t download_sha256_from_server(const char *url, uint8_t *hash)
+{
+    esp_http_client_config_t config = {
+        .url = url,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = 5000,
+        .buffer_size = 64,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL)
+    {
+        return ESP_FAIL;
+    }
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK)
+    {
+        esp_http_client_cleanup(client);
+        return err;
+    }
+
+    int content_length = esp_http_client_fetch_headers(client);
+    if (content_length != 32)
+    {
+        ESP_LOGE("ota", "哈希文件大小异常: %d", content_length);
+    }
+
+    int read_len = esp_http_client_read(client, (char *)hash, 32);
+    esp_http_client_cleanup(client);
+
+    return (read_len == 32) ? ESP_OK : ESP_FAIL;
+}
+
 static void get_sha256_of_partitions(void)
 {
-    uint8_t sha_256[HASH_LEN] = {0};
-    esp_partition_t partition;
+    uint8_t sha_256[32] = {0};
 
-    // get sha256 digest for bootloader
-    partition.address = ESP_BOOTLOADER_OFFSET;
-    partition.size = ESP_PARTITION_TABLE_OFFSET;
-    partition.type = ESP_PARTITION_TYPE_APP;
-    esp_partition_get_sha256(&partition, sha_256);
+    // 打印bootloader的sha256
+    esp_partition_t bootloader = {
+        .address = ESP_BOOTLOADER_OFFSET,
+        .size = ESP_PARTITION_TABLE_OFFSET,
+        .type = ESP_PARTITION_TYPE_APP,
+    };
+    if (esp_partition_get_sha256(&bootloader, sha_256) == ESP_OK)
+    {
+        ESP_LOGI("ota", "Bootloader SHA256: %02x%02x...", sha_256[0], sha_256[1]);
+    }
 
-    // get sha256 digest for running partition
-    esp_partition_get_sha256(esp_ota_get_running_partition(), sha_256);
+    // 打印当前运行分区的sha256
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    if (running && esp_partition_get_sha256(running, sha_256) == ESP_OK)
+    {
+        ESP_LOGI("ota", "Running[%s] SHA256: %02x%02x...",
+                 running->label, sha_256[0], sha_256[1]);
+    }
 }
 
 #define TAG "ota"
@@ -75,17 +124,104 @@ static void App_Communication_OTADownloadBin(void)
     esp_event_loop_create_default();
 
     esp_http_client_config_t config = {
-        .url = "http://192.168.0.101:8080/hello_world.bin",
+        .url = "http://192.168.0.102:8080/hello_world.bin",
         .crt_bundle_attach = esp_crt_bundle_attach,
         .event_handler = NULL,
         .keep_alive_enable = true,
+        .timeout_ms = 10000,
     };
 
     esp_https_ota_config_t ota_config = {
         .http_config = &config,
     };
 
-    esp_https_ota(&ota_config);
+    esp_https_ota_handle_t ota_handle;
+
+    /* 4. 开始OTA（改用分步式接口）*/
+    err = esp_https_ota_begin(&ota_config, &ota_handle);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE("ota", "OTA开始失败");
+        return;
+    }
+
+    /* 5. 分片下载 */
+    while (1)
+    {
+        err = esp_https_ota_perform(ota_handle);
+        if (err != ESP_ERR_HTTPS_OTA_IN_PROGRESS)
+        {
+            break;
+        }
+        printf("."); // 进度指示
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    printf("\n");
+
+    /* 6. ✨✨✨ 关键检查1：是否完整接收 ✨✨✨ */
+    if (esp_https_ota_is_complete_data_received(ota_handle) != true)
+    {
+        ESP_LOGE("ota", "下载不完整，取消升级");
+        esp_https_ota_abort(ota_handle);
+        return;
+    }
+
+    /* 7. ✨✨✨ 关键检查2：获取更新后的分区 ✨✨✨ */
+    const esp_partition_t *updated_partition = esp_ota_get_next_update_partition(NULL);
+    if (updated_partition == NULL)
+    {
+        ESP_LOGE("ota", "获取更新分区失败");
+        esp_https_ota_abort(ota_handle);
+        return;
+    }
+
+    /* 8. ✨✨✨ 关键检查3：计算SHA256并比对 ✨✨✨ */
+    uint8_t calculated_sha[32] = {0};
+    err = esp_partition_get_sha256(updated_partition, calculated_sha);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE("ota", "计算哈希失败");
+        esp_https_ota_abort(ota_handle);
+        return;
+    }
+
+    // 从服务器下载预期的哈希值
+    uint8_t expected_sha[32] = {0};
+    err = download_sha256_from_server("http://192.168.0.102:8080/hello_world.bin.sha256",
+                                      expected_sha);
+    if (err == ESP_OK)
+    {
+        // 比对哈希
+        if (memcmp(calculated_sha, expected_sha, 32) != 0)
+        {
+            ESP_LOGE("ota", "SHA256校验失败！");
+            esp_https_ota_abort(ota_handle);
+            return;
+        }
+        ESP_LOGE("ota", "SHA256校验通过 ✓");
+    }
+    else
+    {
+        ESP_LOGE("ota", "未获取到预期哈希，仅依赖基础校验");
+    }
+
+    /* 9. 完成OTA */
+    err = esp_https_ota_finish(ota_handle);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE("ota", "OTA完成失败");
+        return;
+    }
+
+    /* 10. 设置启动分区（显式调用更安全）*/
+    err = esp_ota_set_boot_partition(updated_partition);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE("ota", "设置启动分区失败");
+        return;
+    }
+
+    ESP_LOGE("ota", "OTA成功，准备重启");
 }
 
 /**
@@ -158,7 +294,7 @@ void App_Communication_OTA(void)
     Dri_Wifi_Init();
 
     /* 2. ota升级   使用python启动个本地http-server 命令
-          D:\test\ota_testpython -m http.server 8080
+          D:\test\ota_test python -m http.server 8080
     */
     printf("ota开始升级\r\n");
     App_Communication_OTADownloadBin();
