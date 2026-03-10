@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "esp_task_wdt.h"
 #include "Inf/Inf_DBR6120.h"
 #include "Inf/Inf_WTN6170.h"
 #include "Inf/Inf_SC12B.h"
@@ -14,7 +15,7 @@
 void key_Scan_task(void *pvParameters);
 TaskHandle_t keyScanHandle;
 
-void finger_Scan_Task(void *pvParameters);
+void finger_Scan_task(void *pvParameters);
 TaskHandle_t fingerScanHandle;
 
 void app_main(void)
@@ -34,7 +35,7 @@ void app_main(void)
     // 2. 创建一个读取按键的任务
     xTaskCreate(key_Scan_task, "key_Scan_task", 8192, NULL, 5, &keyScanHandle);
     // 3. 创建一个指纹模块的任务
-    xTaskCreate(finger_Scan_Task, "finger_Scan_Task", 2048, NULL, 5, &fingerScanHandle);
+    xTaskCreate(finger_Scan_task, "finger_Scan_task", 2048, NULL, 5, &fingerScanHandle);
 }
 
 void key_Scan_task(void *pvParameters)
@@ -75,79 +76,23 @@ void key_Scan_task(void *pvParameters)
 /**
  * @brief 指纹扫描任务
  */
-void finger_Scan_Task(void *pvParameters)
+void finger_Scan_task(void *pvParameters)
 {
     while (1)
     {
-        App_IO_Finger();
-        vTaskDelay(50);
+
+        // 等待通知，设置超时时间
+        uint32_t notifyValue = 0;
+        BaseType_t result = xTaskNotifyWait(UINT32_MAX, UINT32_MAX, &notifyValue, pdMS_TO_TICKS(5000));
+
+        if (result == pdTRUE)
+        {
+            // 有通知，处理指纹操作
+            App_IO_Finger();
+        }
+
+        vTaskDelay(200);
     }
 }
-
-// void app_main(void)
-// {
-//     // 初始化电机模块
-//     Inf_DBR6120_Init();
-//     // Inf_DBR6120_Forward();
-//     // vTaskDelay(1000);
-//     // // 开锁
-//     // Inf_DBR6120_OpenLock();
-//     // // 初始化语音模块
-//     // Inf_WTN6170_Init();
-//     // // 发送指令
-//     // Inf_WTN6170_SendCmd(0xF3);
-//     // Inf_WTN6170_SendCmd(64);
-//     // Inf_WTN6170_SendCmd(0xF3);
-//     // Inf_WTN6170_SendCmd(65);
-//     // 初始化SC12B按键模块
-//     Inf_SC12B_Init();
-//     Touch_Key touchKey = KEY_NO;
-//     // 初始化WS2812 全彩led
-//     Inf_WS2812_Init();
-//     // 点亮所有led为白色
-//     Inf_WS2812_LightAllKeyLeds(white);
-//     // 初始化NVS模块
-//     Dri_NVS_Init();
-//     esp_err_t err = Dri_NVS_IsKeyExist((uint8_t *)"admin");
-//     if (err == ESP_OK)
-//     {
-//         MY_LOGE("admin key exist");
-//     }
-//     else
-//     {
-//         MY_LOGE("admin key not exist");
-//     }
-//     uint8_t data[3] = {'1', '2', '3'};
-//     Dri_NVS_WriteStr((uint8_t *)"aaa", data);
-//     err = Dri_NVS_ReadStr((uint8_t *)"aaa", recData, &recLen);
-//     MY_LOGE("err = %d", err);
-//     if (Dri_NVS_IsKeyExist((uint8_t *)"aaa") == ESP_OK)
-//     {
-//         MY_LOGE("recData = %s, recLen = %d", recData, recLen);
-//     }
-//     else
-//     {
-//         MY_LOGE("aaa key not exist");
-//     }
-//     while (1)
-//     {
-//         // touchKey = Inf_SC12B_ReadKey();
-//         // if (touchKey != KEY_NO)
-//         // {
-//         //     MY_LOGE("touchKey = %d", touchKey);
-//         // }
-//         if (isTouch)
-//         {
-//             touchKey = Inf_SC12B_ReadKey();
-//             if (touchKey != KEY_NO)
-//             {
-//                 MY_LOGE("touchKey = %d", touchKey);
-//                 // 点亮指定的按键led为红色
-//                 Inf_WS2812_LightKeyLed(touchKey, red);
-//             }
-//             // 清除标记位
-//             isTouch = 0;
-//         }
-//         vTaskDelay(10);
-//     }
-// }
+extern uint8_t isTouch;
+extern uint8_t hasFinger;

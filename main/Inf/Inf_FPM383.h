@@ -6,6 +6,7 @@
 #include "driver/gpio.h"
 #include "Com_Debug.h"
 #include "Com_Config.h"
+#include "esp_timer.h"
 
 #define Inf_FPM383_TX_PIN GPIO_NUM_21
 #define Inf_FPM383_RX_PIN GPIO_NUM_20

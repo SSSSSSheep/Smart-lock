@@ -591,10 +591,9 @@ void App_IO_Finger(void)
             }
         }
 
-        // 进入休眠模式 由于芯片本身有自己的定时器 所以不需要手动进入休眠模式
-        // Inf_FPM383_Sleep();
+        // 进入休眠模式
         vTaskDelay(2000);
-        esp_restart();
+        Inf_FPM383_Sleep();
     }
     // 默认清空 没有任务通知 表示验证指纹
     else
@@ -620,10 +619,7 @@ void App_IO_Finger(void)
                 sayWithoutInt();
                 sayRetry();
             }
-
-            // 进入休眠模式 由于芯片本身有自己的定时器 所以不需要手动进入休眠模式
-            // Inf_FPM383_Sleep();
-            esp_restart();
+            Inf_FPM383_Sleep();
         }
     }
 }

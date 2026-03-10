@@ -6,10 +6,18 @@ static const int RX_BUF_SIZE = 1024;
 static uint8_t rx_buf[100] = {1};
 
 uint8_t hasFinger = 0;
-static void Inf_FPM383_Intr_Handler(void *args)
+static void IRAM_ATTR Inf_FPM383_Intr_Handler(void *args)
 {
-    // esp_rom_printf("Inf_FPM383_Intr_Handler\n");
-    hasFinger = 1;
+    // 防抖处理：检查中断引脚的状态
+    static uint32_t last_interrupt_time = 0;
+    uint32_t current_time = esp_timer_get_time();
+
+    // 忽略短时间内的重复中断（防抖）
+    if (current_time - last_interrupt_time > 100000)
+    { // 100ms防抖
+        hasFinger = 1;
+        last_interrupt_time = current_time;
+    }
 }
 
 /**
@@ -115,6 +123,156 @@ void Inf_FPM383_Init(void)
     Inf_FPM383_Sleep();
 }
 
+/**
+ * @brief 诊断指纹模组通信问题
+ * @return 诊断结果，0表示正常，非0表示有问题
+ */
+int Inf_FPM383_Diagnose(void)
+{
+    MY_LOGE("开始诊断指纹模组通信问题...");
+
+    // 1. 测试串口通信
+    MY_LOGE("1. 测试串口通信...");
+    uint8_t test_cmd[12] = {
+        0xEF,
+        0x01, // 包头
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF, // 设备地址
+        0x01, // 包标识
+        0x00,
+        0x03, // 包长度
+        0x33, // 指令码
+        0x00,
+        0x37, // 校验和
+    };
+
+    // 发送测试指令
+    int send_len = uart_write_bytes(UART_NUM_1, test_cmd, 12);
+    if (send_len != 12)
+    {
+        MY_LOGE("错误: 串口发送失败，只发送了 %d 字节", send_len);
+        return 1;
+    }
+    MY_LOGE("串口发送成功，发送了 12 字节");
+
+    // 接收响应
+    memset(rx_buf, 0, sizeof(rx_buf));
+    vTaskDelay(pdMS_TO_TICKS(100)); // 等待响应
+    int recv_len = uart_read_bytes(UART_NUM_1, rx_buf, sizeof(rx_buf), 1000);
+
+    if (recv_len <= 0)
+    {
+        MY_LOGE("错误: 未接收到响应");
+        return 2;
+    }
+
+    MY_LOGE("接收到 %d 字节响应:", recv_len);
+    for (int i = 0; i < recv_len; i++)
+    {
+        MY_LOGE("0x%02X ", rx_buf[i]);
+    }
+    MY_LOGE("");
+
+    // 2. 检查响应格式
+    MY_LOGE("2. 检查响应格式...");
+    if (recv_len < 12)
+    {
+        MY_LOGE("错误: 响应长度不足，至少需要 12 字节");
+        return 3;
+    }
+
+    if (rx_buf[0] != 0xEF || rx_buf[1] != 0x01)
+    {
+        MY_LOGE("错误: 响应包头不正确");
+        return 4;
+    }
+
+    if (rx_buf[9] != 0x00 && rx_buf[9] != 0x01)
+    {
+        MY_LOGE("错误: 响应状态码不正确，期望 0x00 或 0x01，实际 0x%02X", rx_buf[9]);
+        return 5;
+    }
+    else if (rx_buf[9] == 0x01)
+    {
+        MY_LOGE("注意: 模组已经处于休眠状态");
+    }
+
+    // 3. 测试休眠指令
+    MY_LOGE("3. 测试休眠指令...");
+    int retry = 0;
+    const int MAX_RETRY = 3;
+    bool sleep_success = false;
+
+    do
+    {
+        MY_LOGE("尝试进入休眠模式... (%d/%d)", retry + 1, MAX_RETRY);
+
+        // 发送休眠指令
+        Inf_FPM383_SendData(test_cmd, 12);
+
+        // 接收响应
+        memset(rx_buf, 0, sizeof(rx_buf));
+        int sleep_recv = uart_read_bytes(UART_NUM_1, rx_buf, 12, 2000);
+
+        if (sleep_recv == 12)
+        {
+            MY_LOGE("接收到休眠响应:");
+            for (int i = 0; i < 12; i++)
+            {
+                MY_LOGE("0x%02X ", rx_buf[i]);
+            }
+            MY_LOGE("");
+
+            if (rx_buf[9] == 0x00 || rx_buf[9] == 0x01)
+            {
+                MY_LOGE("休眠指令执行成功!");
+                sleep_success = true;
+                break;
+            }
+            else
+            {
+                MY_LOGE("休眠指令执行失败，状态码: 0x%02X", rx_buf[9]);
+            }
+        }
+        else
+        {
+            MY_LOGE("未接收到完整的休眠响应，只收到 %d 字节", sleep_recv);
+        }
+
+        retry++;
+        vTaskDelay(pdMS_TO_TICKS(500));
+    } while (retry < MAX_RETRY);
+
+    if (!sleep_success)
+    {
+        MY_LOGE("错误: 无法进入休眠模式");
+        return 6;
+    }
+
+    // 4. 测试中断功能
+    MY_LOGE("4. 测试中断功能...");
+    gpio_intr_enable(Inf_FPM383_INTR_PIN);
+    MY_LOGE("中断已启用，等待指纹触发...");
+
+    // 等待一段时间看是否有中断触发
+    vTaskDelay(pdMS_TO_TICKS(5000));
+
+    if (hasFinger)
+    {
+        MY_LOGE("中断功能正常，检测到指纹");
+        hasFinger = 0; // 重置标志
+    }
+    else
+    {
+        MY_LOGE("警告: 未检测到指纹中断，可能需要手动测试");
+    }
+
+    MY_LOGE("诊断完成，所有测试通过!");
+    return 0;
+}
+
 void Inf_FPM383_Sleep(void)
 {
     // 1. 准备指令集
@@ -131,21 +289,70 @@ void Inf_FPM383_Sleep(void)
         0x33, // 指令码
         0x00,
         0x37, // 校验和
-
     };
 
-    // 2.发送指令进入休眠模式 直至成功
+    // 2. 禁用中断，防止在休眠过程中被触发
+    gpio_intr_disable(Inf_FPM383_INTR_PIN);
+
+    // 3.发送指令进入休眠模式
+    int retry = 0;
+    const int MAX_RETRY = 3;
+    bool sleep_success = false;
+
     do
     {
-        MY_LOGE("即将进入休眠模式...");
-        // 2.1 发送指令
+        MY_LOGE("即将进入休眠模式... (尝试 %d/%d)", retry + 1, MAX_RETRY);
+        // 3.1 发送指令
         Inf_FPM383_SendData(cmd, 12);
 
-        // 2.2 接收应答包
-        Inf_FPM383_RecvData(12, 2000);
-    } while (rx_buf[9] != 0x00);
+        // 3.2 接收应答包
+        Com_Status status = Inf_FPM383_RecvData(12, 2000);
 
-    // 3. 休眠成功 开启中断 发送任意指令可以唤醒模块
+        MY_LOGE("接收状态: %d", status);
+        if (status == Com_OK)
+        {
+            MY_LOGE("接收到的数据:");
+            for (int i = 0; i < 12; i++)
+            {
+                MY_LOGE("0x%02X ", rx_buf[i]);
+            }
+            MY_LOGE("");
+
+            // 检查响应
+            if (rx_buf[0] == 0xEF && rx_buf[1] == 0x01 && // 包头
+                rx_buf[6] == 0x07)
+            { // 包标识
+
+                if (rx_buf[9] == 0x00)
+                {
+                    // 休眠成功
+                    sleep_success = true;
+                    MY_LOGE("休眠指令执行成功!");
+                    break;
+                }
+                else if (rx_buf[9] == 0x01)
+                {
+                    // 已经处于休眠状态
+                    sleep_success = true;
+                    MY_LOGE("模组已经处于休眠状态!");
+                    break;
+                }
+                else
+                {
+                    MY_LOGE("休眠指令执行失败，状态码: 0x%02X", rx_buf[9]);
+                }
+            }
+            else
+            {
+                MY_LOGE("响应格式不正确");
+            }
+        }
+
+        retry++;
+        vTaskDelay(pdMS_TO_TICKS(300));
+    } while (retry < MAX_RETRY);
+
+    // 4. 开启中断 发送任意指令可以唤醒模块
     MY_LOGE("进入休眠模式成功...");
     gpio_intr_enable(Inf_FPM383_INTR_PIN);
 }
