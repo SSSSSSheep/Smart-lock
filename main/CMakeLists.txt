@@ -2,7 +2,7 @@ idf_component_register(
     SRCS 
         "main.c"
         "Common/Com_Debug.c"
-        "Inf/Inf_DBR6120.c"
+        "Inf/Inf_BDR6120.c"
         "Inf/Inf_WTN6170.c"
         "Inf/Inf_SC12B.c"
         "Inf/Inf_WS2812.c"
@@ -12,6 +12,7 @@ idf_component_register(
         "Driver/Dri_Wifi.c"
         "App/App_IO.c"
         "App/App_Communication.c"
+        "App/App_LowPower.c"
     INCLUDE_DIRS
          "."
          "Common"

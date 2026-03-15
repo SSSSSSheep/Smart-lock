@@ -1,37 +1,24 @@
-#include <inttypes.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/event_groups.h"
-#include "esp_system.h"
-#include "esp_log.h"
-#include "nvs_flash.h"
-#include "esp_bt.h"
-
-#include "esp_gap_ble_api.h"
-#include "esp_gatts_api.h"
-#include "esp_bt_defs.h"
-#include "esp_bt_main.h"
-#include "esp_bt_device.h"
-
 #include "Dri_BLE.h"
 
-#define GATTS_TABLE_TAG "SEC_GATTS_DEMO"
+/* 定义esp32收到手机数据时的回调弱函数函数 */
+void __attribute__((weak)) App_Communication_RecvDataCb(uint8_t *data, uint16_t dataLen)
+{
+}
+
+#define GATTS_TABLE_TAG "dri_ble"
 
 #define HEART_PROFILE_NUM 1
 #define HEART_PROFILE_APP_IDX 0
 #define ESP_HEART_RATE_APP_ID 0x55
-#define EXAMPLE_DEVICE_NAME "Sheep"
+
+/* 蓝牙设备名 */
+#define EXAMPLE_DEVICE_NAME "smart-lock"
 #define HEART_RATE_SVC_INST_ID 0
 
 #define GATTS_DEMO_CHAR_VAL_LEN_MAX 0x40
 
 #define ADV_CONFIG_FLAG (1 << 0)
 #define SCAN_RSP_CONFIG_FLAG (1 << 1)
-
-/* 定义esp32收到手机数据时的回调弱函数函数 */
-void __attribute__((weak)) App_Communication_RecvDataCb(uint8_t *data, uint16_t dataLen)
-{
-}
 
 static uint8_t adv_config_done = 0;
 
@@ -109,7 +96,8 @@ struct gatts_profile_inst
 };
 
 static void gatts_profile_event_handler(esp_gatts_cb_event_t event,
-                                        esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
+                                        esp_gatt_if_t gatts_if,
+                                        esp_ble_gatts_cb_param_t *param);
 
 /* One gatt-based profile one app_id and one gatts_if, this array will store the gatts_if returned by ESP_GATTS_REG_EVT */
 static struct gatts_profile_inst heart_rate_profile_tab[HEART_PROFILE_NUM] = {
@@ -261,6 +249,7 @@ static char *esp_auth_req_to_str(esp_ble_auth_req_t auth_req)
     return auth_str;
 }
 
+/* 显示已经配对的设备 */
 static void show_bonded_devices(void)
 {
     int dev_num = esp_ble_get_bond_device_num();
@@ -382,9 +371,7 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     {
         esp_bd_addr_t bd_addr;
         memcpy(bd_addr, param->ble_security.auth_cmpl.bd_addr, sizeof(esp_bd_addr_t));
-        ESP_LOGI(GATTS_TABLE_TAG, "remote BD_ADDR: %08x%04x",
-                 (bd_addr[0] << 24) + (bd_addr[1] << 16) + (bd_addr[2] << 8) + bd_addr[3],
-                 (bd_addr[4] << 8) + bd_addr[5]);
+        ESP_LOGI(GATTS_TABLE_TAG, "remote BD_ADDR: %08x%04x", (bd_addr[0] << 24) + (bd_addr[1] << 16) + (bd_addr[2] << 8) + bd_addr[3], (bd_addr[4] << 8) + bd_addr[5]);
         ESP_LOGI(GATTS_TABLE_TAG, "address type = %d", param->ble_security.auth_cmpl.addr_type);
         ESP_LOGI(GATTS_TABLE_TAG, "pair status = %s", param->ble_security.auth_cmpl.success ? "success" : "fail");
         if (!param->ble_security.auth_cmpl.success)
@@ -440,8 +427,10 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param
     }
 }
 
+/* gatt 事件回调函数 */
 static void gatts_profile_event_handler(esp_gatts_cb_event_t event,
-                                        esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
+                                        esp_gatt_if_t gatts_if,
+                                        esp_ble_gatts_cb_param_t *param)
 {
     ESP_LOGV(GATTS_TABLE_TAG, "event = %x", event);
     switch (event)
@@ -450,14 +439,13 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event,
         esp_ble_gap_set_device_name(EXAMPLE_DEVICE_NAME);
         // generate a resolvable random address
         esp_ble_gap_config_local_privacy(true);
-        esp_ble_gatts_create_attr_tab(heart_rate_gatt_db, gatts_if,
-                                      HRS_IDX_NB, HEART_RATE_SVC_INST_ID);
+        esp_ble_gatts_create_attr_tab(heart_rate_gatt_db, gatts_if, HRS_IDX_NB, HEART_RATE_SVC_INST_ID);
         break;
     case ESP_GATTS_READ_EVT:
         break;
     case ESP_GATTS_WRITE_EVT:
         ESP_LOGI(GATTS_TABLE_TAG, "ESP_GATTS_WRITE_EVT, write value:");
-
+        esp_log_buffer_hex(GATTS_TABLE_TAG, param->write.value, param->write.len);
         App_Communication_RecvDataCb(param->write.value, param->write.len);
         break;
     case ESP_GATTS_EXEC_WRITE_EVT:
@@ -501,14 +489,12 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event,
         {
             if (param->add_attr_tab.num_handle == HRS_IDX_NB)
             {
-                memcpy(heart_rate_handle_table, param->add_attr_tab.handles,
-                       sizeof(heart_rate_handle_table));
+                memcpy(heart_rate_handle_table, param->add_attr_tab.handles, sizeof(heart_rate_handle_table));
                 esp_ble_gatts_start_service(heart_rate_handle_table[HRS_IDX_SVC]);
             }
             else
             {
-                ESP_LOGE(GATTS_TABLE_TAG, "Create attribute table abnormally, num_handle (%d) doesn't equal to HRS_IDX_NB(%d)",
-                         param->add_attr_tab.num_handle, HRS_IDX_NB);
+                ESP_LOGE(GATTS_TABLE_TAG, "Create attribute table abnormally, num_handle (%d) doesn't equal to HRS_IDX_NB(%d)", param->add_attr_tab.num_handle, HRS_IDX_NB);
             }
         }
         else
@@ -523,8 +509,7 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event,
     }
 }
 
-static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if,
-                                esp_ble_gatts_cb_param_t *param)
+static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
 {
     /* If event is register event, store the gatts_if for each profile */
     if (event == ESP_GATTS_REG_EVT)
@@ -535,9 +520,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
         }
         else
         {
-            ESP_LOGI(GATTS_TABLE_TAG, "Reg app failed, app_id %04x, status %d",
-                     param->reg.app_id,
-                     param->reg.status);
+            ESP_LOGI(GATTS_TABLE_TAG, "Reg app failed, app_id %04x, status %d", param->reg.app_id, param->reg.status);
             return;
         }
     }
@@ -559,34 +542,33 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
-void Dri_BLE_Init(void)
+void Inf_BLE_Init(void)
 {
+    MY_LOGE("蓝牙开始初始化...");
+
     esp_err_t ret;
 
-    // 初始化FLASH用于存储连接设备信息
+    // Initialize NVS.
     ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
-        ESP_ERROR_CHECK(nvs_flash_erase());
+        nvs_flash_erase();
         ret = nvs_flash_init();
     }
-    ESP_ERROR_CHECK(ret);
+    /* 1. 释放了 Classic Bluetooth 的内存. 我们只用到了BLE */
+    esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
 
-    // 当前模式为低功耗，不管之前是否初始化过，都需要释放经典蓝牙内存
-    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
-
-    // 创建蓝牙配置信息
+    /* 2. 蓝牙控制器的配置设置为默认模式 */
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
 
-    // 初始化蓝牙模块
+    /* 3. 初始化控制器 */
     ret = esp_bt_controller_init(&bt_cfg);
     if (ret)
     {
         ESP_LOGE(GATTS_TABLE_TAG, "%s init controller failed: %s", __func__, esp_err_to_name(ret));
         return;
     }
-
-    // 启动蓝牙模块
+    /* 4. 使能控制器: BLE模式 */
     ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (ret)
     {
@@ -595,38 +577,35 @@ void Dri_BLE_Init(void)
     }
 
     ESP_LOGI(GATTS_TABLE_TAG, "%s init bluetooth", __func__);
-
-    // 蓝牙应用层初始化
+    /* 5. 初始化 bluedroid协议栈 */
     ret = esp_bluedroid_init();
     if (ret)
     {
         ESP_LOGE(GATTS_TABLE_TAG, "%s init bluetooth failed: %s", __func__, esp_err_to_name(ret));
         return;
     }
-
-    // 蓝牙应用层使能
+    /* 6. 使能bluedroid协议栈 */
     ret = esp_bluedroid_enable();
     if (ret)
     {
         ESP_LOGE(GATTS_TABLE_TAG, "%s enable bluetooth failed: %s", __func__, esp_err_to_name(ret));
         return;
     }
-
-    // 注册回调函数
+    /* 7. 定义一个全局的gatt回调处理函数 */
     ret = esp_ble_gatts_register_callback(gatts_event_handler);
     if (ret)
     {
         ESP_LOGE(GATTS_TABLE_TAG, "gatts register error, error code = %x", ret);
         return;
     }
-
-    // 注册回调函数
+    /* 8. 定义一个全局的gap回调处理函数 */
     ret = esp_ble_gap_register_callback(gap_event_handler);
     if (ret)
     {
         ESP_LOGE(GATTS_TABLE_TAG, "gap register error, error code = %x", ret);
         return;
     }
+    /* 9. 注册一个应用 */
     ret = esp_ble_gatts_app_register(ESP_HEART_RATE_APP_ID);
     if (ret)
     {
@@ -635,26 +614,51 @@ void Dri_BLE_Init(void)
     }
 
     /* set the security iocap & auth_req & key size & init key response key parameters to the stack*/
-    esp_ble_auth_req_t auth_req = ESP_LE_AUTH_REQ_SC_MITM_BOND; // bonding with peer device after authentication
-    esp_ble_io_cap_t iocap = ESP_IO_CAP_NONE;                   // set the IO capability to No output No input
-    uint8_t key_size = 16;                                      // the key size should be 7~16 bytes
+    /*
+        设置安全性参数，包括
+            IO 能力（iocap）、
+            认证要求（auth_req）、
+            密钥大小（key size）、
+            初始化密钥
+            响应密钥参数
+        到协议栈中。
+    */
+    esp_ble_io_cap_t iocap = ESP_IO_CAP_OUT;
+    esp_ble_auth_req_t auth_req = ESP_LE_AUTH_NO_BOND;
+    uint8_t key_size = 16; // the key size should be 7~16 bytes
     uint8_t init_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
     uint8_t rsp_key = ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK;
     // set static passkey
-    uint32_t passkey = 123456;
+    uint32_t passkey = 234567;
     uint8_t auth_option = ESP_BLE_ONLY_ACCEPT_SPECIFIED_AUTH_DISABLE;
     uint8_t oob_support = ESP_BLE_OOB_DISABLE;
+
+    /* 设置静态密码:  passkey*/
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_STATIC_PASSKEY, &passkey, sizeof(uint32_t));
+
+    /* 设置认证要求模式: ESP_LE_AUTH_BOND */
     esp_ble_gap_set_security_param(ESP_BLE_SM_AUTHEN_REQ_MODE, &auth_req, sizeof(uint8_t));
+
+    /* 设置IO能力模式: ESP_IO_CAP_NONE */
     esp_ble_gap_set_security_param(ESP_BLE_SM_IOCAP_MODE, &iocap, sizeof(uint8_t));
+
+    /* 设置最大密钥大小 */
     esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(uint8_t));
+
+    /* 仅接受指定的安全认证模式:  ESP_BLE_ONLY_ACCEPT_SPECIFIED_AUTH_DISABLE*/
     esp_ble_gap_set_security_param(ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH, &auth_option, sizeof(uint8_t));
+
+    /* 设置 Out-Of-Band 支持（OOB Support) 额外通信通道*/
     esp_ble_gap_set_security_param(ESP_BLE_SM_OOB_SUPPORT, &oob_support, sizeof(uint8_t));
     /* If your BLE device acts as a Slave, the init_key means you hope which types of key of the master should distribute to you,
     and the response key means which key you can distribute to the master;
     If your BLE device acts as a master, the response key means you hope which types of key of the slave should distribute to you,
     and the init key means which key you can distribute to the slave. */
+
+    /* 设置初始化密钥（Init Key）： */
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_INIT_KEY, &init_key, sizeof(uint8_t));
+
+    /* 设置响应密钥（Response Key）： */
     esp_ble_gap_set_security_param(ESP_BLE_SM_SET_RSP_KEY, &rsp_key, sizeof(uint8_t));
 
     /* Just show how to clear all the bonded devices

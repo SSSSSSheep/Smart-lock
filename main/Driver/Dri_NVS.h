@@ -3,47 +3,23 @@
 
 #include <stdio.h>
 #include <inttypes.h>
+#include "esp_task.h"
+#include "esp_system.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "Com_Config.h"
+#include "string.h"
+
+#define MY_NVS_NAMESPACE "pwd"
+
+extern nvs_handle_t my_nvs_handle;
 
 void Dri_NVS_Init(void);
 
-/**
- * @brief 写入字符串到 NVS
- *
- * @param key 键名
- * @param value 键值
- */
-esp_err_t Dri_NVS_WriteStr(uint8_t *key, uint8_t *value);
+esp_err_t Dri_NVS_WriteU8(char *k, uint8_t v);
 
-/**
- * @brief 从 NVS 读取字符串
- *
- * @param key 键名
- * @param value 键值
- * @param value_len 键值长度
- */
-esp_err_t Dri_NVS_ReadStr(uint8_t *key, uint8_t *value, uint8_t *value_len);
+esp_err_t Dri_NVS_ReadU8(char *k, uint8_t *v);
 
-/**
- * @brief 删除 NVS 中的指定键
- *
- * @param key 键名
- */
-esp_err_t Dri_NVS_DelKey(uint8_t *key);
+Com_Status Dri_NVS_IsKeyExist(uint8_t *key, uint8_t isFull);
 
-/**
- * @brief 删除 NVS 中的所有键
- *
- */
-esp_err_t Dri_NVS_DelAll(void);
-
-/**
- * @brief 检查 NVS 中是否存在指定键
- *
- * @param key 键名
- * @return esp_err_t ESP_OK 成功, 其他值失败
- */
-esp_err_t Dri_NVS_IsKeyExist(uint8_t *key);
-
-#endif /* __DRI_NVS_H__ */
+#endif

@@ -1,8 +1,8 @@
 /*
 全彩led驱动:
-  ESP32 驱动 WS2812（也称为 NeoPixel）LED 的常用方法是使用 RMT（Remote Control）外设。
-  这种方法可以精确地生成 WS2812 所需的信号
-*/
+    ESP32 驱动 WS2812（也称为 NeoPixel）LED 的常用方法是使用 RMT（Remote Control）外设。
+    这种方法可以精确地生成 WS2812 所需的时间信号
+ */
 #include "Inf_WS2812.h"
 
 /* 使用RMT 外设时的计时器分辨率，以赫兹（Hz）为单位 */
@@ -77,7 +77,6 @@ static size_t encoder_callback(const void *data,
     // need one to encode a reset, but it's simpler to simply demand that
     // there are 8 symbol spaces free to write anything.
     if (symbols_free < 8)
-
     {
         return 0;
     }
@@ -88,15 +87,12 @@ static size_t encoder_callback(const void *data,
     size_t data_pos = symbols_written / 8;
     uint8_t *data_bytes = (uint8_t *)data;
     if (data_pos < data_size)
-
     {
         // Encode a byte
         size_t symbol_pos = 0;
         for (int bitmask = 0x80; bitmask != 0; bitmask >>= 1)
-
         {
             if (data_bytes[data_pos] & bitmask)
-
             {
                 symbols[symbol_pos++] = ws2812_one;
             }
@@ -113,10 +109,8 @@ static size_t encoder_callback(const void *data,
         // All bytes already are encoded.
         // Encode the reset, and we're done.
         symbols[0] = ws2812_reset;
-        *done = 1;
-        // Indicate end of the transaction.
-        return 1;
-        // we only wrote one symbol
+        *done = 1; // Indicate end of the transaction.
+        return 1;  // we only wrote one symbol
     }
 }
 /**
@@ -170,8 +164,7 @@ static void Inf_WS2812_LightLeds(void)
                  simple_encoder,    /* 编码器 */
                  ledColors,         /* 要发送的颜色数据 */
                  sizeof(ledColors), /* 要发送的数据缓冲区的长度 */
-                 &tx_config);
-    /* 发送配置 */
+                 &tx_config);       /* 发送配置 */
 
     /* 2. 等待发送完成 */
     rmt_tx_wait_all_done(led_chan, portMAX_DELAY);
@@ -180,11 +173,12 @@ static void Inf_WS2812_LightLeds(void)
 /**
  * @description: 点亮指定的按键对应的led为指定的颜色
  * @param {Touch_Key} key 指定的按键
- * @param {uint8_t} color 指定的颜色 长度必须是3 [G, R, B]
+ * @param {uint8_t} color 指定的颜色  长度必须是3 [G, R, B]
  * @return {*}
  */
 void Inf_WS2812_LightKeyLed(Touch_Key key, uint8_t color[])
 {
+
     memset(ledColors, 0, sizeof(ledColors));
     uint8_t index = key;
     memcpy(&ledColors[index * 3], color, 3);
@@ -193,20 +187,14 @@ void Inf_WS2812_LightKeyLed(Touch_Key key, uint8_t color[])
 
 /**
  * @description: 点亮所有led为相同的指定的颜色
- * @param {uint8_t} color 指定的颜色 长度必须是3 [G, R, B]
+ * @param {uint8_t} color 指定的颜色  长度必须是3 [G, R, B]
  * @return {*}
  */
 void Inf_WS2812_LightAllKeyLeds(uint8_t color[])
 {
     for (uint8_t i = 0; i < sizeof(ledColors); i += 3)
-
     {
         memcpy(&ledColors[i], color, 3);
     }
     Inf_WS2812_LightLeds();
-}
-
-void Inf_WS2812_LightLedBlack(void)
-{
-    Inf_WS2812_LightAllKeyLeds(black);
 }

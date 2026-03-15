@@ -1,625 +1,406 @@
+/*
+IO模块:
+    1. 按键输入
+    2. led显示
+    3. 语音输出
+    4. 电机驱动
+    5. 指纹输入
+
+键盘输入协议:
+    1. 所有输入都是以 # 结束
+    2. 输入M位非法输入, 以前所有输入作废
+    3. 协议规则
+            01#  新增密码
+            02#  删除密码
+                ...
+
+
+            10#  新增指纹
+            11#  删除指纹
+                ...
+
+            20#  OTA更新
+                ...
+    4. 数字超过2位的认为时在输入密码开门
+ */
 #include "App_IO.h"
 
-uint8_t first_buffer[100] = {0};
-uint8_t second_buffer[100] = {0};
+/* 临时存储用户输入的密码 (把数字转成它的字符形式存储, 方便后面当做字符串处理) */
+static uint8_t password[100] = {0};
+/* 临时存储的用户输入的密码的字符数 */
+static uint8_t passwordLen = 0;
 
-extern TaskHandle_t fingerScanHandle;
-extern uint8_t hasFinger;
-
-static void App_IO_ClearBuffer(void)
-{
-    memset(first_buffer, 0, sizeof(first_buffer));
-    memset(second_buffer, 0, sizeof(second_buffer));
-}
+static void App_IO_InputHandle(void);
 
 /**
- * @brief 添加管理员
- *  1.1 输入特殊指令(00#) 已经判断过
- *  1.2 按键输入管理员密码
- *  1.3 再次按键输入管理员密码确认
- *  1.4 确认密码一致后添加管理员
- *  1.5 根据比较结果做相应处理
+ * @description: 输入模块启动
+ * @return {*}
  */
-static void App_IO_AddAdmin(void)
+void App_IO_Start(void)
 {
-    // 判断管理员密码是否存在
-    if (Dri_NVS_IsKeyExist((uint8_t *)ADMIN_PWD) == ESP_OK) // 已存在
-    {
-        sayAdminFull();
-    }
-    else
-    {
-        sayWithoutInt();
-        sayAddAdmin();
-        sayWithoutInt();
-        sayInputAdminPassword();
-
-        // 按键输入管理员密码
-        Com_Status comStatus = App_IO_ReadStr(first_buffer);
-        // 根据当前获取按键组合返回值做不同处理
-        switch (comStatus)
-        {
-        case Com_OK:
-            // 再次输入管理员密码
-            sayInputAdminPasswordAgain();
-            Com_Status comStatus = App_IO_ReadStr(second_buffer);
-            switch (comStatus)
-            {
-            case Com_OK:
-                // 两次密码输入完成，比较密码是否一致
-                if (strcmp((char *)first_buffer, (char *)second_buffer) == 0)
-                {
-                    // 密码一致，添加管理员写入FLASH
-                    esp_err_t err = Dri_NVS_WriteStr((uint8_t *)ADMIN_PWD, first_buffer);
-                    if (err == ESP_OK)
-                    {
-                        sayAddSucc();
-                    }
-                    else
-                    {
-                        sayAddFail();
-                    }
-                }
-                else
-                {
-                    // 密码不一致
-                    sayAddFail();
-                }
-                break;
-            case Com_ERROR:
-                sayIllegalOperation();
-                break;
-            default:
-                break;
-            }
-            /* code */
-            break;
-        case Com_ERROR:
-            sayIllegalOperation();
-            break;
-        default:
-            break;
-        }
-        // 清理缓冲区
-        App_IO_ClearBuffer();
-    }
-}
-
-/**
- * @brief 检查管理员账号是否存在
- *
- */
-static Com_Status App_IO_CheckAdmin(void)
-{
-    // 语音提示输入管理员账号
-    sayWithoutInt();
-    sayInputAdminPassword();
-
-    // 读取按键组合
-    Com_Status comStatus = App_IO_ReadStr(first_buffer);
-    switch (comStatus)
-    {
-    case Com_OK:
-        // 从FLASH中读取已经存在的管理员密码
-        uint8_t len = 0;
-        esp_err_t err = Dri_NVS_ReadStr((uint8_t *)ADMIN_PWD, second_buffer, &len);
-
-        // 比较从键盘输入与FLASH中读取的密码长度是否一致
-        if (strcmp((char *)first_buffer, (char *)second_buffer) == 0)
-        {
-            return Com_OK;
-        }
-        break;
-    case Com_ERROR:
-        sayIllegalOperation();
-        break;
-    default:
-        break;
-    }
-
-    // 清理缓冲区
-    App_IO_ClearBuffer();
-    return Com_ERROR;
-}
-
-/*
-    2.删除管理员账号
-        1.1 输入特殊指令(01#) 输入已完成
-        1.2 判断管理员账号是否存在
-        1.3 按键输入管理员密码
-        1.4 从FLASH中读取已经存在的管理员密码
-        1.5 比较从键盘输入与FLASH中读取的密码
-        1.6 根据比较结果做处理
- */
-static void App_IO_DelAdmin(void)
-{
-    // 判断管理员账号是否存在
-    if (Dri_NVS_IsKeyExist((uint8_t *)ADMIN_PWD) != ESP_OK) // 不存在
-    {
-        sayIllegalOperation();
-        return;
-    }
-    else // 存在
-    {
-        sayWithoutInt();
-        sayDelAdmin();
-        Com_Status comStatus = App_IO_CheckAdmin();
-        if (comStatus == Com_OK)
-        {
-            // 执行删除管理员操作
-            esp_err_t err = Dri_NVS_DelKey((uint8_t *)ADMIN_PWD);
-            if (err == ESP_OK)
-            {
-                sayDelSucc();
-            }
-            else
-            {
-                sayDelFail();
-            }
-        }
-        else
-        {
-            sayDelFail();
-        }
-    }
-}
-
-/*
-        3.注册普通用户账号
-        1.1 输入特殊指令(10#)
-        1.2 按键输入密码(管理员)
-        1.3 从FLASH中读取已经存在的管理员密码
-        1.4 比较从键盘输入与FLASH中读取的密码
-        1.5 根据比较结果做处理
-            比较结果不同:
-                注册失败
-            比较结果相同:
-                按键输入密码(普通账号)
-                再次输入密码(普通账号)
-                比较两次输入结果
-                根据比较结果做处理
-*/
-static void App_IO_AddUser(void)
-{
-    // 判断管理员是否存在
-    if (Dri_NVS_IsKeyExist((uint8_t *)ADMIN_PWD) != ESP_OK) // 不存在
-    {
-        sayIllegalOperation();
-    }
-    else
-    {
-        // 验证管理员
-        sayWithoutInt();
-        sayAddUser();
-        Com_Status comStatus = App_IO_CheckAdmin();
-
-        if (comStatus == Com_OK)
-        {
-            // 按键输入密码
-            sayInputUserPassword();
-            comStatus = App_IO_ReadStr(first_buffer);
-            switch (comStatus)
-            {
-            case Com_OK:
-                // 再次输入密码
-                sayInputUserPasswordAgain();
-                comStatus = App_IO_ReadStr(second_buffer);
-
-                switch (comStatus)
-                {
-                case Com_OK:
-                    // 比较两次键盘读取的按键组合
-                    if (strcmp((char *)first_buffer, (char *)second_buffer) == 0)
-                    {
-                        // 将用户密码写入FLASH
-                        esp_err_t err = Dri_NVS_WriteStr((uint8_t *)first_buffer, (uint8_t *)"0");
-                        if (err == ESP_OK)
-                        {
-                            // 密码一致
-                            sayAddSucc();
-                        }
-                        else
-                        {
-                            // 密码不一致
-                            sayAddFail();
-                        }
-                    }
-                    else
-                    {
-                        // 密码不一致
-                        sayAddFail();
-                    }
-                    break;
-                case Com_ERROR:
-                    sayIllegalOperation();
-                    break;
-                default:
-                    break;
-                }
-
-                break;
-            case Com_ERROR:
-                sayIllegalOperation();
-                break;
-            default:
-                break;
-            }
-        }
-        else
-        {
-            sayAddFail();
-        }
-    }
-
-    // 清理缓冲区
-    App_IO_ClearBuffer();
-}
-
-/*
-    4.删除普通用户账号
-        1.1 输入特殊指令(11#)
-        1.2 按键输入密码(管理员)
-        1.3 从FLASH中读取已经存在的管理员密码
-        1.4 比较从键盘输入与FLASH中读取的密码
-        1.5 根据比较结果做处理
-            比较结果不同:
-                删除失败
-            比较结果相同:
-                按键输入密码(普通账号)
-                从FLASH中读取已经存在的普通用户密码
-                比较两次输入结果
-                根据比较结果做处理
- */
-static void App_IO_DelUser(void)
-{
-    // 判断管理员是否存在
-    if (Dri_NVS_IsKeyExist((uint8_t *)ADMIN_PWD) != ESP_OK) // 不存在
-    {
-        sayIllegalOperation();
-    }
-    else
-    {
-        sayWithoutInt();
-        sayDelUser();
-        // 验证管理员
-        Com_Status comStatus = App_IO_CheckAdmin();
-
-        if (comStatus == Com_OK)
-        {
-            sayInputUserPassword();
-            comStatus = App_IO_ReadStr(first_buffer);
-            switch (comStatus)
-            {
-            case Com_OK:
-
-                // 判断当前输入的数字组合在FLASH中是否存在
-                if (Dri_NVS_IsKeyExist((uint8_t *)first_buffer) == ESP_OK)
-                {
-                    // 执行删除操作
-                    esp_err_t err = Dri_NVS_DelKey((uint8_t *)first_buffer);
-                    if (err == ESP_OK)
-                    {
-                        sayDelSucc();
-                    }
-                    else
-                    {
-                        sayDelFail();
-                    }
-                }
-                else
-                {
-                    sayDelFail();
-                }
-                break;
-            case Com_ERROR:
-                sayIllegalOperation();
-                break;
-            default:
-                break;
-            }
-        }
-        else
-        {
-            sayDelFail();
-        }
-    }
-
-    // 清理缓冲区
-    App_IO_ClearBuffer();
-}
-
-/*
-    5.验证普通用户密码开锁
-        5.1 按键输入密码(普通账号)
-        5.2 从FLASH中读取已经存在的普通用户密码
-        5.3 比较两次输入结果
-            比较结果不同:
-                验证失败 -&gt; 请重试
-            比较结果相同:
-                验证成功 驱动电机开锁
- */
-static void App_IO_CheckUser(uint8_t *pwd)
-{
-    // 判断当前输入的数字组合在FLASH中是否存在
-    if (Dri_NVS_IsKeyExist(pwd) == ESP_OK)
-    {
-        sayVerifySucc();
-        Inf_DBR6120_OpenLock();
-        sayDoorOpen();
-    }
-    else
-    {
-        sayWithoutInt();
-        sayVerifyFail();
-        sayWithoutInt();
-        sayRetry();
-    }
-
-    // 清理缓冲区
-    App_IO_ClearBuffer();
-}
-
-void App_IO_Init(void)
-{
-    // 1. 电机初始化
-    Inf_DBR6120_Init();
-    // 2. 语音模块初始化
-    Inf_WTN6170_Init();
-    // 3. 按键模块初始化
+    /* 1. 触摸感应器初始化 */
     Inf_SC12B_Init();
-    // 4. LED模块初始化
+    /* 2. LED初始化 */
     Inf_WS2812_Init();
-    Inf_WS2812_LightLedBlack();
-    // 5. 初始化NVS模块
+    /* 3. nvs初始化 */
     Dri_NVS_Init();
-    // 6. 指纹模块初始化
+    /* 4. 初始化语音输出模块 */
+    Inf_WTN6170_Init();
+    /* 5. 电机驱动芯片初始化 */
+    Inf_BDR6120_Init();
+    /* 6. 指纹初始化 */
     Inf_FPM383_Init();
 }
 
-Com_Status App_IO_ReadStr(uint8_t *pwd)
+/**
+ * @description: 按键扫描
+ *
+ *    密码输入和设定 状态机:  共分为3个状态
+ *      0:自由状态:       默认状态. 在此状态下, 如果检测到有任何按键, 则进入 1:密码输入阶段
+ *
+ *      1:密码输入阶段
+ *                      保存密码
+ *      2:输入完成阶段
+ *                      对输入密码根据协议进行各种处理
+ *
+ * @return {*}
+ */
+/* 输入状态 */
+static Input_Status inputStatus = FREE;
+
+/* 修改 App_IO.c 中的 App_IO_KeyScan 函数 */
+void App_IO_KeyScan(void)
 {
-    // 定义一个没有按键的时间变量
-    uint8_t noKeyTime = 0;
+    /* 没有输入按键的时间 */
+    static uint16_t noKeyTime = 0;
 
-    // 定义一个密码索引变量
-    uint8_t pwdIndex = 0;
-
-    while (1)
+    Touch_Key key = Inf_SC12B_KeyClick();
+    /* 1. 如果没有按键按下直接返回 */
+    if (key == KEY_NO)
     {
-        // 读取一次按键值
-        Touch_Key touchKey = Inf_SC12B_GetKeyClick();
-
-        // 判断是否有按键按下
-        if (touchKey == KEY_NO)
+        noKeyTime++;
+        if (noKeyTime >= 5 * 20) /* 如果超过5s没有输入密码, 则关闭所有led */
         {
-            // 没有按键按下，时间累加
-            noKeyTime++;
-            if (noKeyTime >= 100)
-            {
-                // 没有按键按下100次，认为输入完成
-                return Com_TIMEOUT;
-            }
+            Inf_WS2812_LightAllKeyLeds(black);
+            noKeyTime = 5 * 20; /* 防止nokeyTime溢出 */
+            inputStatus = FREE; /* 输入状态进入自由状态 */
+        }
+        return;
+    }
+
+    noKeyTime = 0;
+    /* 2. 状态处理 */
+    switch (inputStatus)
+    {
+    /* 自由阶段: 有按键按下, 相当于激活键盘, 此次按键不报错, 然后进入输入阶段 */
+    case FREE:
+    {
+        Inf_WS2812_LightAllKeyLeds(white);
+        inputStatus = INPUT;
+
+        // 直接处理当前按键，避免下次循环再次处理
+        if (key == KEY_M)
+        {
+            MY_LOGE("输入了M, 非法输入");
+            sayIllegalOperation();
+            inputStatus = FREE;
+        }
+        else if (key == KEY_SHARP)
+        {
+            inputStatus = DONE;
+            /* 水滴声 */
+            sayWaterDrop();
+            vTaskDelay(100);
+
+            /* 对输入进行处理 */
+            App_IO_InputHandle();
+
+            /*
+                输入处理之后:
+                    1. 状态进入自由状态
+                    2. 密码清零
+            */
+            inputStatus = FREE;
+            passwordLen = 0;
+            memset((char *)password, 0, sizeof(password));
         }
         else
         {
-            // 有按键被按下,响声与LED灯
-            Inf_WS2812_LightLedBlack();
+            /*不是 # 就保存密码  存储他们的字符形式  0->'0  1->'1' */
+            password[passwordLen++] = key + 48;
+            /* 水滴声 */
             sayWaterDrop();
-            Inf_WS2812_LightKeyLed(touchKey, white);
+        }
+        break;
+    }
+    /* 输入阶段: 存储输入的按键, 存储字符而不是数字 对0-9来说, +48变成对应的字符  */
+    case INPUT:
+    {
+        /* 灯光处理 */
+        Inf_WS2812_LightAllKeyLeds(black);
+        vTaskDelay(30);
+        Inf_WS2812_LightKeyLed(key, blue);
 
-            // 有按键按下，时间重置
-            noKeyTime = 0;
+        if (key == KEY_M)
+        {
+            MY_LOGE("输入了M, 非法输入");
+            sayIllegalOperation();
+            inputStatus = FREE;
+        }
+        else if (key == KEY_SHARP)
+        {
+            inputStatus = DONE;
+            /* 水滴声 */
+            sayWaterDrop();
+            vTaskDelay(100);
 
-            // 根据具体按键做不同处理
-            if (touchKey == KEY_M)
-            {
-                return Com_ERROR;
-            }
-            else if (touchKey == KEY_SHARP)
-            {
-                return Com_OK;
-            }
-            else // 数字键
-            {
-                // 记录下数字键
-                pwd[pwdIndex++] = touchKey + 48; // 将按键值转换为对应的ASCII码
-            }
+            /* 对输入进行处理 */
+            App_IO_InputHandle();
+
+            /*
+                输入处理之后:
+                    1. 状态进入自由状态
+                    2. 密码清零
+            */
+            inputStatus = FREE;
+            passwordLen = 0;
+            memset((char *)password, 0, sizeof(password));
+        }
+        else
+        {
+            /*不是 # 就保存密码  存储他们的字符形式  0->'0  1->'1' */
+            password[passwordLen++] = key + 48;
+            /* 水滴声 */
+            sayWaterDrop();
         }
 
-        vTaskDelay(50);
+        break;
+    }
+    default:
+        break;
     }
 }
 
-/*
-   按键组合
-   00#：注册管理员
-   01#：删除管理员
-   10#：注册用户
-   11#：删除用户
-   99+：删除所有用户
+static uint8_t isAddPwd = 0;
+static uint8_t isDelPwd = 0;
+/**
+ * @description: 当输入结束之后, 开始对输入进行处理
+ * @return {*}
  */
-void App_IO_Handler(uint8_t *pwd)
+static void App_IO_InputHandle(void)
 {
-    // 取出数组中元素个数
-    uint8_t len = strlen((char *)pwd);
 
-    // 根据不同的长度做不同的处理
-    if (len < 2)
+    MY_LOGE("开始处理输入, 输入: %s", password);
+    if (passwordLen < 2)
     {
+        MY_LOGE("非法输入");
         sayIllegalOperation();
     }
-    else if (len == 2)
+    else if (passwordLen == 2)
     {
-        // 注册管理员
-        if (pwd[0] == '0' && pwd[1] == '0')
+        /* 命令输入 */
+        if (password[0] == '0' && password[1] == '1') /*添加密码 */
         {
-            App_IO_AddAdmin();
+            isAddPwd = 1;
+
+            MY_LOGE("添加密码");
+            sayAddUser();
+            vTaskDelay(1000);
+            sayPassword();
+            vTaskDelay(200);
         }
-        // 删除管理员
-        else if (pwd[0] == '0' && pwd[1] == '1')
+        else if (password[0] == '0' && password[1] == '2') /* 删除密码 */
         {
-            App_IO_DelAdmin();
+            isDelPwd = 1;
+
+            MY_LOGE("删除密码");
+            sayDelUser();
+            vTaskDelay(500);
+            sayPassword();
+            vTaskDelay(200);
         }
-        // 添加普通用户
-        else if (pwd[0] == '1' && pwd[1] == '0')
+        else if (password[0] == '1' && password[1] == '1') /* 添加指纹 */
         {
-            App_IO_AddUser();
+            xTaskNotify(fingerprintScanTaskkHandle, (uint32_t)'1', eSetValueWithOverwrite);
         }
-        // 注册指纹
-        else if (pwd[0] == '2' && pwd[1] == '0')
+        else if (password[0] == '1' && password[1] == '2') /* 删除指纹 */
         {
-            // 验证管理员
-            sayWithoutInt();
-            sayAddUserFingerprint();
-            Com_Status comStatus = App_IO_CheckAdmin();
-            // 通知指纹模块任务
-            if (comStatus == Com_OK)
-            {
-                xTaskNotify(fingerScanHandle, (uint32_t)1, eSetValueWithOverwrite);
-            }
-            else
-            {
-                sayVerifyFail();
-            }
+            xTaskNotify(fingerprintScanTaskkHandle, (uint32_t)'2', eSetValueWithOverwrite);
         }
-        // 删除指纹
-        else if (pwd[0] == '2' && pwd[1] == '1')
+        else if (password[0] == '2' && password[1] == '1') /* ota */
         {
-            // 验证管理员
-            sayWithoutInt();
-            sayDelUserFingerprint();
-            Com_Status comStatus = App_IO_CheckAdmin();
-            // 通知指纹模块任务
-            if (comStatus == Com_OK)
-            {
-                xTaskNotify(fingerScanHandle, (uint32_t)2, eSetValueWithOverwrite);
-            }
-            else
-            {
-                sayVerifyFail();
-            }
-        }
-        // 执行OTA升级
-        else if (pwd[0] == '3' && pwd[1] == '3')
-        {
-            // 执行OTA升级
-            App_Communication_OTA();
-        }
-        // 删除所有指纹
-        else if (pwd[0] == '8' && pwd[1] == '8')
-        {
-            sayDelAll();
-            Inf_FPM383_DelAllFingerPrint();
-        }
-        // 删除所有用户
-        else if (pwd[0] == '9' && pwd[1] == '9')
-        {
-            sayDelAll();
-            Dri_NVS_DelAll();
-        }
-        // 指令不存在
-        else
-        {
-            sayIllegalOperation();
+            xTaskNotify(communicationHandle, (uint32_t)1, eSetValueWithOverwrite);
         }
     }
-    // 第一次输入超过两个数字，表示在验证密码开锁
-    else
+    else if (passwordLen > 2)
     {
-        App_IO_CheckUser(pwd);
+        if (isAddPwd)
+        {
+            isAddPwd = 0;
+            App_IO_AddPwd(password, passwordLen);
+        }
+        else if (isDelPwd)
+        {
+            isDelPwd = 0;
+            App_IO_DelPwd(password);
+        }
+        else
+        {
+            App_IO_CheckPwd(password);
+        }
     }
 }
 
-void App_IO_Finger(void)
+/**
+ * @description: 添加密码
+ *   我们使用密码直接作为key, value存储个u8 0即可
+ *      好处:
+ *          1.方便存取
+ *          2.自动去重
+ *          3.减少空间占用
+ *
+ * @return {*}
+ */
+void App_IO_AddPwd(uint8_t *pwd, uint8_t pwdLen)
 {
-    // 等待通知
-    uint32_t notifyValue = 0;
-    xTaskNotifyWait(UINT32_MAX, UINT32_MAX, &notifyValue, 0);
 
-    // 根据操作值进行不同的业务处理
-    if (notifyValue)
+    /* 1. 设置的密码长度 判断  不小于5*/
+    if (pwdLen < 5)
     {
-        // 关闭指纹模块的中断 防止在注册或者删除之后自动走一次验证代码
-        gpio_intr_disable(Inf_FPM383_INTR_PIN);
-
-        // 注册指纹逻辑
-        if (notifyValue == 1)
-        {
-            sayPlaceFinger();
-            vTaskDelay(1500);
-            // 获取最小的可用ID
-            uint16_t id = Inf_FPM383_GetMinId();
-            MY_LOGE("minId:%d", id);
-
-            // 注册指纹
-            Com_Status comStatus = Inf_FPM383_AddFingerPrint(id);
-
-            if (comStatus == Com_OK)
-            {
-                sayFingerprintAddSucc();
-            }
-            else
-            {
-                sayFingerprintAddFail();
-            }
-        }
-        // 删除指纹逻辑
-        else if (notifyValue == 2)
-        {
-            sayPlaceFinger();
-            vTaskDelay(1500); // 听完语音以后再放手指
-            // 获取当前放置手指的ID
-            uint16_t id = Inf_FPM383_FindFingerPrint();
-            MY_LOGE("DEL ID = %d", id);
-
-            if (id != -1)
-            {
-                // 删除指纹
-                Com_Status comStatus = Inf_FPM383_DelFingerPrint(id);
-                if (comStatus == Com_OK)
-                {
-                    sayDelSucc();
-                }
-                else
-                {
-                    sayDelFail();
-                }
-            }
-            else
-            {
-                sayDelFail();
-            }
-        }
-
-        // 进入休眠模式
-        vTaskDelay(2000);
-        Inf_FPM383_Sleep();
+        MY_LOGE("密码长度: %d < 5, 新的密码存储失败!", pwdLen);
+        sayPasswordAddFail();
+        return;
     }
-    // 默认清空 没有任务通知 表示验证指纹
+
+    /* 2. 验证密码个数不能超过100 */
+    uint8_t pwdCnt = 0;
+    Dri_NVS_ReadU8("pwd_cnt", &pwdCnt);
+    if (pwdCnt >= 100)
+    {
+        MY_LOGE("密码已满 100 个, 新的密码存储失败!");
+        sayPasswordAddFail();
+        return;
+    }
+    /* 3. 存储密码 */
+    /* 3.1. 存储密码个数  密码个数+1*/
+    pwdCnt++;
+    Dri_NVS_WriteU8("pwd_cnt", pwdCnt);
+    /* 3.2. 存储密码 */
+    esp_err_t err = Dri_NVS_WriteU8((char *)pwd, 0);
+    if (err == ESP_OK)
+    {
+        MY_LOGE("密码存储成功");
+        sayPasswordAddSucc();
+    }
     else
     {
-        // 判断是否有手指按下
-        if (hasFinger)
-        {
-            // 清理标记位
-            hasFinger = 0;
+        MY_LOGE("密码存储失败");
+        sayPasswordAddFail();
+    }
+}
 
-            // 验证指纹 开锁
-            Com_Status comStatus = Inf_FPM383_CheckFingerPrint();
-            if (comStatus == Com_OK)
-            {
-                sayVerifySucc();
-                Inf_DBR6120_OpenLock();
-                sayDoorOpen();
-            }
-            else
-            {
-                sayWithoutInt();
-                sayVerifyFail();
-                sayWithoutInt();
-                sayRetry();
-            }
+/**
+ * @description: 当用密码开门时, 读取键盘输入的密码, 然后与NVS中存储的密码做比对
+ * @return {*}
+ */
+void App_IO_CheckPwd(uint8_t *pwd)
+{
+    if (Dri_NVS_IsKeyExist(pwd, 0) == Com_OK)
+    {
+        MY_LOGE("密码验证成功");
+        sayPasswordVerifySucc();
+        Inf_BDR6120_LockOpen(); /* 驱动电机开锁 */
+        sayDoorOpen();
+        MY_LOGE("门已开");
+    }
+    else
+    {
+        MY_LOGE("密码错误, 请重试...");
+        sayPasswordVerifyFail(); /* 验证失败 */
+        vTaskDelay(1500);
+        sayRetry();
+    }
+}
+
+/**
+ * @description: 删除密码
+ * @return {*}
+ */
+void App_IO_DelPwd(uint8_t *pwd)
+{
+    esp_err_t err = nvs_erase_key(my_nvs_handle, (char *)pwd);
+    if (err == ESP_OK)
+    {
+        MY_LOGE("删除成功");
+        sayDelSucc();
+    }
+    else
+    {
+        MY_LOGE("删除失败");
+        sayDelFail();
+    }
+}
+
+/**
+ * @description: 手指扫描
+ * @return {*}
+ */
+void App_IO_FingerPrintScan(void)
+{
+    uint32_t action = 0;
+    xTaskNotifyWait(0xffffffff, 0xffffffff, &action, 0);
+
+    if (action != 0) /* 有指纹相关操作: 添加指纹  删除指纹 */
+    {
+        if (action == '1') /* 添加指纹 */
+        {
+            LED_GREEN_FLICKER;
+            uint8_t id = Inf_FPM383_GetMinAviableId();
+            MY_LOGE("id = %d", id);
+            Inf_FPM383_AutoEnroll(id);
+            // Inf_FPM383_StepEnroll(id);
+            Inf_FPM383_Sleep();
+            esp_restart();
+        }
+        else if (action == '2') /* 删除指纹 */
+        {
+            LED_RED_FLICKER;
+            Inf_FPM383_DeleteFingerPrint();
+            Inf_FPM383_Sleep();
+            esp_restart();
+        }
+    }
+    else
+    {
+        Com_Status isOk = Inf_FPM383_AutoIdentify();
+        if (isOk == Com_OK)
+        {
+            MY_LOGE("指纹验证通过...");
+            sayFingerprintVerifySucc(); /* 语音: 指纹验证成功 */
+            Inf_BDR6120_LockOpen();
+            sayDoorOpen(); /* 开门: 音效 */
+            Inf_FPM383_Sleep();
+        }
+        else if (isOk == Com_ERROR)
+        {
+            MY_LOGE("指纹验证失败...");
+            sayFingerprintVerifyFail(); /* 语音: 指纹验证失败 */
+            Inf_FPM383_Sleep();
+        }
+        else if (isOk == Com_TIMEOUT)
+        {
             Inf_FPM383_Sleep();
         }
     }
+}
+
+void App_IO_PrintfPassword(void)
+{
+    MY_LOGE("密码长度: %d", passwordLen);
+    printf("密码内容:");
+    for (uint8_t i = 0; i < passwordLen; i++)
+    {
+        printf("%c", password[i]);
+    }
+    printf("\r\n");
 }
